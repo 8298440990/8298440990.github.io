@@ -30,6 +30,11 @@ self.addEventListener('activate', event => {
 });
 
 self.addEventListener('fetch', event => {
+    // 自身のオリジン以外のリクエスト（Cloudflareの解析スクリプト等）はService Workerの処理から除外する
+    if (!event.request.url.startsWith(self.location.origin)) {
+        return;
+    }
+
     event.respondWith(
         fetch(event.request).then(response => {
             if (response && response.status === 200 && response.type === 'basic') {
