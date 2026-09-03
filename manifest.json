@@ -1,0 +1,17 @@
+{
+    "name": "神罪閣下製作委員会",
+    "short_name": "神罪閣下製作委員会",
+    "start_url": "./index.html",
+    "display": "standalone",
+    "background_color": "#ffffff",
+    "theme_color": "#7c3aed",
+    "description": "",
+    "icons": [
+        {
+            "src": "image/favicon.png",
+            "sizes": "192x192 512x512",
+            "type": "image/png",
+            "purpose": "any maskable"
+        }
+    ]
+}
