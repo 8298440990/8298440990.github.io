@@ -1,4 +1,4 @@
-const CACHE_NAME = 'shinzai-sns-v1';
+const CACHE_NAME = 'shinzai-sns-v2';
 const STATIC_ASSETS = [
     './',
     './index.html',
@@ -11,6 +11,7 @@ const STATIC_ASSETS = [
 ];
 
 self.addEventListener('install', event => {
+    // 新しい Service Worker をすぐにアクティブ化
     self.skipWaiting();
     event.waitUntil(
         caches.open(CACHE_NAME).then(cache => cache.addAll(STATIC_ASSETS))
@@ -20,50 +21,70 @@ self.addEventListener('install', event => {
 self.addEventListener('activate', event => {
     event.waitUntil(
         Promise.all([
-            // 古いキャッシュの削除
+            // 古いバージョンの不要なキャッシュを削除
             caches.keys().then(cacheNames => {
                 return Promise.all(
-                    cacheNames.filter(name => name !== CACHE_NAME).map(name => caches.delete(name))
+                    cacheNames
+                        .filter(name => name !== CACHE_NAME)
+                        .map(name => caches.delete(name))
                 );
             }),
-            // すぐにコントロールを開始させる
+            // 制御下のページ（clients）のネットワーク処理を即座に引き継ぐ
             self.clients.claim()
         ])
     );
 });
 
 self.addEventListener('fetch', event => {
-    // 外部ドメインや GET 以外のリクエスト（POSTなどのAPI）は無視
+    const url = new URL(event.request.url);
+
+    // 1. 同一オリジン以外の外部リクエストおよび GET 以外のメソッド（POST/PUT等）はスルー（例外処理）
     if (!event.request.url.startsWith(self.location.origin) || event.request.method !== 'GET') {
         return;
     }
 
+    // 2. APIリクエスト（例: /api/ 配下）の除外処理
+    if (url.pathname.startsWith('/api/')) {
+        return;
+    }
+
+    // ネットワーク優先（Network First）戦略
     event.respondWith(
         fetch(event.request)
-            .then(response => {
-                // 静的ファイル（CSS, JS, 画像等）のみを動的キャッシュ対象にする
-                // ※ APIリクエスト（例: /api/...）はキャッシュしない
-                const url = new URL(event.request.url);
-                const isStaticAsset = STATIC_ASSETS.some(asset => url.pathname.endsWith(asset.replace('./', '')));
-
-                if (response && response.status === 200 && response.type === 'basic' && isStaticAsset) {
-                    const responseClone = response.clone();
+            .then(networkResponse => {
+                // 正常なレスポンス（200 OK かつ basic/cors タイプ）の場合のみキャッシュを最新化
+                if (
+                    networkResponse &&
+                    networkResponse.status === 200 &&
+                    (networkResponse.type === 'basic' || networkResponse.type === 'cors')
+                ) {
+                    const responseClone = networkResponse.clone();
                     caches.open(CACHE_NAME).then(cache => {
                         cache.put(event.request, responseClone);
                     });
                 }
-                return response;
+                return networkResponse;
             })
-            .catch(() => {
-                // オフライン時のフォールバック
-                return caches.match(event.request).then(cachedResponse => {
-                    if (cachedResponse) {
-                        return cachedResponse;
+            .catch(async () => {
+                // オフラインまたはネットワークエラー時のフォールバック処理
+                const cachedResponse = await caches.match(event.request);
+                if (cachedResponse) {
+                    return cachedResponse;
+                }
+
+                // ナビゲーション（HTML表示）リクエスト時のフォールバック設定
+                if (event.request.mode === 'navigate' || event.request.headers.get('accept')?.includes('text/html')) {
+                    const indexCache = await caches.match('./index.html') || await caches.match('./');
+                    if (indexCache) {
+                        return indexCache;
                     }
-                    // HTMLリクエストでキャッシュが見つからない場合はトップページ（index.html）を返す
-                    if (event.request.headers.get('accept')?.includes('text/html')) {
-                        return caches.match('./index.html') || caches.match('./');
-                    }
+                }
+
+                // キャッシュにも見つからない場合はエラーレスポンスを返す
+                return new Response('Network error and no cache available', {
+                    status: 503,
+                    statusText: 'Service Unavailable',
+                    headers: new Headers({ 'Content-Type': 'text/plain; charset=utf-8' })
                 });
             })
     );
